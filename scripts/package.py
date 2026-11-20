@@ -12,7 +12,22 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[1]
 APP_NAME = "菜单改键.app"
 IDENTIFIER = "io.github.imkkdev.menu-rebind"
-VERSION = "0.1.0"
+VERSION = "0.1.1"
+
+
+def build_icon(work_directory, destination):
+    source = PROJECT / "Assets" / "AppIcon.png"
+    iconset = work_directory / "AppIcon.iconset"
+    iconset.mkdir()
+    for points in (16, 32, 128, 256, 512):
+        for scale in (1, 2):
+            suffix = "" if scale == 1 else "@2x"
+            image = iconset / f"icon_{points}x{points}{suffix}.png"
+            pixels = str(points * scale)
+            subprocess.run([
+                "sips", "-z", pixels, pixels, str(source), "--out", str(image)
+            ], stdout=subprocess.DEVNULL, check=True)
+    subprocess.run(["iconutil", "-c", "icns", "-o", str(destination), str(iconset)], check=True)
 
 
 def replace_bundle(staged, destination):
@@ -40,17 +55,21 @@ def package(executable, output_directory):
         contents = staged / "Contents"
         binary_directory = contents / "MacOS"
         binary_directory.mkdir(parents=True)
+        resources = contents / "Resources"
+        resources.mkdir()
+        build_icon(Path(temporary), resources / "AppIcon.icns")
         shutil.copy2(executable, binary_directory / "MenuRebind")
         info = {
             "CFBundleDevelopmentRegion": "zh_CN",
             "CFBundleDisplayName": "菜单改键",
             "CFBundleExecutable": "MenuRebind",
+            "CFBundleIconFile": "AppIcon",
             "CFBundleIdentifier": IDENTIFIER,
             "CFBundleInfoDictionaryVersion": "6.0",
             "CFBundleName": "Menu Rebind",
             "CFBundlePackageType": "APPL",
             "CFBundleShortVersionString": VERSION,
-            "CFBundleVersion": "1",
+            "CFBundleVersion": "2",
             "LSMinimumSystemVersion": "14.0",
             "NSHighResolutionCapable": True,
         }

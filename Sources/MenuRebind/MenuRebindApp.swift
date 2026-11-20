@@ -15,9 +15,6 @@ struct MenuRebindApp: App {
 }
 
 private struct ContentView: View {
-    private static let uuIdentifier = "com.netease.uuremote"
-    private static let uuMenu = "关闭网易UU远程"
-    private static let uuShortcut = "@^w"
     private let store = ShortcutStore()
 
     @State private var rules: [ShortcutRule] = []
@@ -43,7 +40,6 @@ private struct ContentView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    preset
                     if editing { editor }
                     ruleList
                 }
@@ -68,31 +64,6 @@ private struct ContentView: View {
         }
     }
 
-    private var preset: some View {
-        HStack(spacing: 13) {
-            Image(systemName: "macwindow")
-                .font(.title3.weight(.medium))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 42, height: 42)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("UU 远程防误关").font(.headline)
-                Text(Self.uuMenu).foregroundStyle(.secondary)
-                HStack(spacing: 6) {
-                    ShortcutLabel(value: "⌘W")
-                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                    ShortcutLabel(value: ShortcutText.display(Self.uuShortcut), emphasized: true)
-                }
-            }
-            Spacer()
-            Button("应用预设", action: applyPreset)
-                .buttonStyle(.borderedProminent)
-        }
-        .padding(14)
-        .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-    }
-
     private var editor: some View {
         VStack(alignment: .leading, spacing: 12) {
             LabeledContent("应用") {
@@ -105,11 +76,27 @@ private struct ContentView: View {
                 }
             }
             LabeledContent("菜单名称") {
-                TextField("例如「关闭」或「文件->关闭」", text: $menuName)
-                    .labelsHidden()
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 270)
-                    .accessibilityLabel("菜单名称")
+                HStack {
+                    TextField("例如「关闭」或「文件->关闭」", text: $menuName)
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 270)
+                        .accessibilityLabel("菜单名称")
+                    Menu("常用名称") {
+                        Section("中文") {
+                            ForEach(["关闭", "关闭窗口", "关闭标签页", "关闭所有窗口", "最小化", "退出"], id: \.self) { name in
+                                Button(name) { menuName = name }
+                            }
+                        }
+                        Section("English") {
+                            ForEach(["Close", "Close Window", "Close Tab", "Close All Windows", "Minimize", "Quit"], id: \.self) { name in
+                                Button(name) { menuName = name }
+                            }
+                        }
+                    }
+                    .fixedSize()
+                    .help("把常见菜单名称填入输入框")
+                }
             }
             LabeledContent("新快捷键") {
                 ShortcutRecorder(value: $shortcut)
@@ -131,7 +118,7 @@ private struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("已改键").font(.headline)
             if rules.isEmpty {
-                Text("还没有由菜单改键管理的快捷键。")
+                Text("还没有改键记录。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 8)
@@ -177,26 +164,12 @@ private struct ContentView: View {
                 return
             }
             application = target
-            if menuName.isEmpty && target.bundleIdentifier == Self.uuIdentifier {
-                menuName = Self.uuMenu
-            }
         }
         if let window = NSApp.keyWindow {
             panel.beginSheetModal(for: window, completionHandler: onChoose)
         } else {
             panel.begin(completionHandler: onChoose)
         }
-    }
-
-    private func applyPreset() {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.uuIdentifier),
-              let application = TargetApplication(url: url),
-              let menu = MenuTitle(Self.uuMenu)
-        else {
-            report("未找到 UU 远程。若它放在其他目录，可以用「添加改键」手动选取。", isError: true)
-            return
-        }
-        apply(Self.uuShortcut, menu: menu, application: application)
     }
 
     private func applyCustom() {
