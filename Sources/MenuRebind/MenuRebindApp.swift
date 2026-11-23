@@ -21,6 +21,7 @@ private struct ContentView: View {
     @State private var editing = false
     @State private var application: TargetApplication?
     @State private var menuName = ""
+    @State private var pickedMenuName: String?
     @State private var shortcut = ""
     @State private var notice: String?
     @State private var isError = false
@@ -119,14 +120,15 @@ private struct ContentView: View {
             } else if runningMenus.isEmpty && configured.isEmpty && package.isEmpty {
                 Text("暂未找到菜单名称")
             }
-            if !runningMenus.isEmpty {
-                Section("App 当前菜单") { menuOptions(runningMenus) }
-            }
-            if !configured.isEmpty {
-                Section("系统已有改键") { menuOptions(configured) }
-            }
-            if !package.isEmpty {
-                Section("安装包候选") { menuOptions(package) }
+            if let application, !runningMenus.isEmpty {
+                Section("\(application.name) 的当前菜单") { menuOptions(runningMenus) }
+                if !configured.isEmpty || !package.isEmpty {
+                    Menu("已有改键和安装包候选") {
+                        menuCandidates(configured: configured, package: package)
+                    }
+                }
+            } else {
+                menuCandidates(configured: configured, package: package)
             }
             Button("读取运行中的菜单…", action: readRunningMenus)
                 .disabled(scanningMenus)
@@ -144,9 +146,22 @@ private struct ContentView: View {
         .help("选取名称并原样填入输入框")
     }
 
+    @ViewBuilder
+    private func menuCandidates(configured: [String], package: [String]) -> some View {
+        if !configured.isEmpty {
+            Section("系统已有改键") { menuOptions(configured) }
+        }
+        if !package.isEmpty {
+            Section("安装包候选") { menuOptions(package) }
+        }
+    }
+
     private func menuOptions(_ names: [String]) -> some View {
         ForEach(names, id: \.self) { name in
-            Button(name.replacingOccurrences(of: "->", with: " › ")) { menuName = name }
+            Button(name.replacingOccurrences(of: "->", with: " › ")) {
+                menuName = name
+                pickedMenuName = name
+            }
         }
     }
 
@@ -200,6 +215,8 @@ private struct ContentView: View {
                 return
             }
             if application != target {
+                if pickedMenuName == menuName { menuName = "" }
+                pickedMenuName = nil
                 clearMenus()
             }
             application = target
@@ -215,11 +232,11 @@ private struct ContentView: View {
 
     private func scanMenus(for target: TargetApplication) async {
         let request = menuScanID
-        let processID = RunningAppMenus.isTrusted ? RunningAppMenus.processID(for: target) : nil
+        let readLiveMenus = RunningAppMenus.isTrusted && RunningAppMenus.processID(for: target) != nil
         let worker = Task.detached(priority: .userInitiated) {
             let configured = (try? ShortcutStore().configuredMenuNames(in: target)) ?? []
             let package = MenuNames.fromBundle(of: target)
-            let running = processID.map { RunningAppMenus.read(processID: $0) } ?? []
+            let running = readLiveMenus ? RunningAppMenus.read(for: target) : []
             return (configured, package, running)
         }
         let (configured, package, running) = await withTaskCancellationHandler {
@@ -232,7 +249,7 @@ private struct ContentView: View {
         packageMenus = package
         runningMenus = running
         scanningMenus = false
-        if processID != nil && running.isEmpty {
+        if readLiveMenus && running.isEmpty {
             report("请让 \(target.name) 显示要改键的窗口，再读取菜单。")
         }
     }
@@ -307,6 +324,7 @@ private struct ContentView: View {
     private func resetEditor() {
         application = nil
         menuName = ""
+        pickedMenuName = nil
         shortcut = ""
         editing = false
         clearMenus()
