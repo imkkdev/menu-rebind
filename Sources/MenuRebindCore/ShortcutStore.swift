@@ -2,7 +2,7 @@ import CoreFoundation
 import Darwin
 import Foundation
 
-public struct TargetApplication: Codable, Equatable {
+public struct TargetApplication: Codable, Equatable, Sendable {
     public let name: String
     public let bundleIdentifier: String
     public let path: String
@@ -79,6 +79,18 @@ public struct ShortcutStore {
 
     public func rules() throws -> [ShortcutRule] {
         try withLock { try loadState().rules }
+    }
+
+    public func configuredMenuNames(in application: TargetApplication) throws -> [String] {
+        let names = try readPreferences(application.bundleIdentifier).compactMap { key, value -> String? in
+            guard value is String else { return nil }
+            let text = key.hasPrefix("\u{1B}")
+                ? key.dropFirst().replacingOccurrences(of: "\u{1B}", with: "->")
+                : key
+            guard let menu = MenuTitle(text), menu.preferenceKey == key else { return nil }
+            return menu.text
+        }
+        return MenuNames.sorted(names)
     }
 
     /// Returns false when the requested shortcut is already present in System Settings.

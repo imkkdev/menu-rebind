@@ -24,6 +24,11 @@ private struct ContentView: View {
     @State private var shortcut = ""
     @State private var notice: String?
     @State private var isError = false
+    @State private var menuScanID = UUID()
+    @State private var scanningMenus = false
+    @State private var packageMenus: [String] = []
+    @State private var configuredMenus: [String] = []
+    @State private var runningMenus: [String] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -59,6 +64,9 @@ private struct ContentView: View {
         }
         .frame(minWidth: 495, minHeight: 340)
         .task { reloadRules() }
+        .task(id: menuScanID) {
+            if let application { await scanMenus(for: application) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             reloadRules()
         }
@@ -82,20 +90,7 @@ private struct ContentView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 270)
                         .accessibilityLabel("菜单名称")
-                    Menu("常用名称") {
-                        Section("中文") {
-                            ForEach(["关闭", "关闭窗口", "关闭标签页", "关闭所有窗口", "最小化", "退出"], id: \.self) { name in
-                                Button(name) { menuName = name }
-                            }
-                        }
-                        Section("English") {
-                            ForEach(["Close", "Close Window", "Close Tab", "Close All Windows", "Minimize", "Quit"], id: \.self) { name in
-                                Button(name) { menuName = name }
-                            }
-                        }
-                    }
-                    .fixedSize()
-                    .help("把常见菜单名称填入输入框")
+                    menuPicker
                 }
             }
             LabeledContent("新快捷键") {
@@ -112,6 +107,47 @@ private struct ContentView: View {
         }
         .padding(14)
         .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var menuPicker: some View {
+        let configured = configuredMenus.filter { !runningMenus.contains($0) }
+        let package = packageMenus.filter { !configuredMenus.contains($0) && !runningMenus.contains($0) }
+
+        return Menu("选取菜单") {
+            if scanningMenus {
+                Text("正在读取菜单…")
+            } else if runningMenus.isEmpty && configured.isEmpty && package.isEmpty {
+                Text("暂未找到菜单名称")
+            }
+            if !runningMenus.isEmpty {
+                Section("App 当前菜单") { menuOptions(runningMenus) }
+            }
+            if !configured.isEmpty {
+                Section("系统已有改键") { menuOptions(configured) }
+            }
+            if !package.isEmpty {
+                Section("安装包候选") { menuOptions(package) }
+            }
+            Button("读取运行中的菜单…", action: readRunningMenus)
+                .disabled(scanningMenus)
+            Menu("手动填写参考") {
+                Section("中文") {
+                    menuOptions(["关闭", "关闭窗口", "关闭标签页", "关闭所有窗口", "最小化", "退出"])
+                }
+                Section("English") {
+                    menuOptions(["Close", "Close Window", "Close Tab", "Close All Windows", "Minimize", "Quit"])
+                }
+            }
+        }
+        .fixedSize()
+        .disabled(application == nil)
+        .help("选取名称并原样填入输入框")
+    }
+
+    private func menuOptions(_ names: [String]) -> some View {
+        ForEach(names, id: \.self) { name in
+            Button(name.replacingOccurrences(of: "->", with: " › ")) { menuName = name }
+        }
     }
 
     private var ruleList: some View {
@@ -163,13 +199,70 @@ private struct ContentView: View {
                 report("无法读取所选 App 的标识符，请选择完整的 .app。", isError: true)
                 return
             }
+            if application != target {
+                clearMenus()
+            }
             application = target
+            notice = nil
+            startMenuScan()
         }
         if let window = NSApp.keyWindow {
             panel.beginSheetModal(for: window, completionHandler: onChoose)
         } else {
             panel.begin(completionHandler: onChoose)
         }
+    }
+
+    private func scanMenus(for target: TargetApplication) async {
+        let request = menuScanID
+        let processID = RunningAppMenus.isTrusted ? RunningAppMenus.processID(for: target) : nil
+        let worker = Task.detached(priority: .userInitiated) {
+            let configured = (try? ShortcutStore().configuredMenuNames(in: target)) ?? []
+            let package = MenuNames.fromBundle(of: target)
+            let running = processID.map { RunningAppMenus.read(processID: $0) } ?? []
+            return (configured, package, running)
+        }
+        let (configured, package, running) = await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+        guard !Task.isCancelled, request == menuScanID, application == target else { return }
+        configuredMenus = configured
+        packageMenus = package
+        runningMenus = running
+        scanningMenus = false
+        if processID != nil && running.isEmpty {
+            report("请让 \(target.name) 显示要改键的窗口，再读取菜单。")
+        }
+    }
+
+    private func readRunningMenus() {
+        guard let application else { return }
+        guard RunningAppMenus.processID(for: application) != nil else {
+            report("请先打开 \(application.name)，再读取运行中的菜单。")
+            return
+        }
+        guard RunningAppMenus.isTrusted else {
+            report("请在「系统设置 → 隐私与安全性 → 辅助功能」允许菜单改键，再读取一次。")
+            RunningAppMenus.requestAccess()
+            return
+        }
+        notice = nil
+        startMenuScan()
+    }
+
+    private func startMenuScan() {
+        scanningMenus = true
+        menuScanID = UUID()
+    }
+
+    private func clearMenus() {
+        packageMenus = []
+        configuredMenus = []
+        runningMenus = []
+        scanningMenus = false
+        menuScanID = UUID()
     }
 
     private func applyCustom() {
@@ -216,6 +309,7 @@ private struct ContentView: View {
         menuName = ""
         shortcut = ""
         editing = false
+        clearMenus()
     }
 
     private func report(_ message: String, isError: Bool = false) {

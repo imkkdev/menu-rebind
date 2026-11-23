@@ -50,6 +50,21 @@ final class ShortcutStoreTests: XCTestCase {
         XCTAssertEqual(fixture.read(), ["关闭": "@^w"])
     }
 
+    func testConfiguredMenuNamesPreserveSpacesAndPaths() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanUp() }
+        let preferences = [
+            "关闭网易UU远程": "@^w",
+            "\u{1B}File\u{1B}Close  Window": "@w",
+            "\u{1B}MenuThatHasNoPath": "@z",
+        ]
+        fixture.write(preferences)
+
+        let names = try fixture.store.configuredMenuNames(in: fixture.application)
+        XCTAssertEqual(Set(names), ["关闭网易UU远程", "File->Close  Window"])
+        XCTAssertEqual(fixture.read(), preferences)
+    }
+
     func testExternalOverrideIsPreservedAndCanBecomeNewBaseline() throws {
         let fixture = try Fixture()
         defer { fixture.cleanUp() }

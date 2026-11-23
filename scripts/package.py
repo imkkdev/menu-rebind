@@ -12,7 +12,7 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[1]
 APP_NAME = "菜单改键.app"
 IDENTIFIER = "io.github.imkkdev.menu-rebind"
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 
 
 def build_icon(work_directory, destination):
@@ -69,7 +69,7 @@ def package(executable, output_directory):
             "CFBundleName": "Menu Rebind",
             "CFBundlePackageType": "APPL",
             "CFBundleShortVersionString": VERSION,
-            "CFBundleVersion": "2",
+            "CFBundleVersion": "3",
             "LSMinimumSystemVersion": "14.0",
             "NSHighResolutionCapable": True,
         }
