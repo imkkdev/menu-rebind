@@ -25,6 +25,7 @@ private struct ContentView: View {
     @State private var shortcut = ""
     @State private var notice: String?
     @State private var isError = false
+    @State private var waitingForAccessibility = false
     @State private var menuScanID = UUID()
     @State private var scanningMenus = false
     @State private var packageMenus: [String] = []
@@ -54,13 +55,27 @@ private struct ContentView: View {
             }
             if let notice {
                 Divider()
-                Text(notice)
-                    .font(.callout)
-                    .foregroundStyle(isError ? Color.red : Color.secondary)
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(notice)
+                            .font(.callout)
+                            .foregroundStyle(isError ? Color.red : Color.secondary)
+                            .accessibilityAddTraits(.updatesFrequently)
+                        if waitingForAccessibility {
+                            Text(Bundle.main.bundlePath)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 12)
-                    .accessibilityAddTraits(.updatesFrequently)
+                    if waitingForAccessibility {
+                        Button("打开辅助功能设置", action: openAccessibilitySettings)
+                            .fixedSize()
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
             }
         }
         .frame(minWidth: 495, minHeight: 340)
@@ -70,6 +85,9 @@ private struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             reloadRules()
+            if waitingForAccessibility && RunningAppMenus.isTrusted {
+                readRunningMenus()
+            }
         }
     }
 
@@ -221,6 +239,7 @@ private struct ContentView: View {
             }
             application = target
             notice = nil
+            waitingForAccessibility = false
             startMenuScan()
         }
         if let window = NSApp.keyWindow {
@@ -261,12 +280,21 @@ private struct ContentView: View {
             return
         }
         guard RunningAppMenus.isTrusted else {
-            report("请在「系统设置 → 隐私与安全性 → 辅助功能」允许菜单改键，再读取一次。")
-            RunningAppMenus.requestAccess()
+            report(
+                "请在辅助功能中添加并开启下方这份 App。若旧条目已开启，请用 − 移除，再用 + 添加。",
+                needsAccessibility: true
+            )
             return
         }
         notice = nil
+        waitingForAccessibility = false
         startMenuScan()
+    }
+
+    private func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func startMenuScan() {
@@ -280,6 +308,8 @@ private struct ContentView: View {
         runningMenus = []
         scanningMenus = false
         menuScanID = UUID()
+        if waitingForAccessibility { notice = nil }
+        waitingForAccessibility = false
     }
 
     private func applyCustom() {
@@ -330,9 +360,10 @@ private struct ContentView: View {
         clearMenus()
     }
 
-    private func report(_ message: String, isError: Bool = false) {
+    private func report(_ message: String, isError: Bool = false, needsAccessibility: Bool = false) {
         notice = message
         self.isError = isError
+        waitingForAccessibility = needsAccessibility
     }
 }
 

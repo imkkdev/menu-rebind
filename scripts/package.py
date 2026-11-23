@@ -2,6 +2,7 @@
 """Build, sign, and optionally install the macOS application bundle."""
 
 import argparse
+import hashlib
 import os
 import plistlib
 import shutil
@@ -12,7 +13,7 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[1]
 APP_NAME = "菜单改键.app"
 IDENTIFIER = "io.github.imkkdev.menu-rebind"
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 
 def build_icon(work_directory, destination):
@@ -30,13 +31,33 @@ def build_icon(work_directory, destination):
     subprocess.run(["iconutil", "-c", "icns", "-o", str(destination), str(iconset)], check=True)
 
 
+def is_project_bundle(bundle):
+    info = bundle / "Contents" / "Info.plist"
+    return info.is_file() and plistlib.loads(info.read_bytes()).get("CFBundleIdentifier") == IDENTIFIER
+
+
+def previous_signing_identity(bundle):
+    if bundle.is_symlink() or not is_project_bundle(bundle):
+        return None
+    with tempfile.TemporaryDirectory(prefix="menu-rebind-signature-") as temporary:
+        prefix = Path(temporary) / "certificate"
+        subprocess.run(
+            ["codesign", "--display", f"--extract-certificates={prefix}", str(bundle)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        leaf = Path(temporary) / "certificate0"
+        if leaf.is_file():
+            # codesign accepts the keychain identity's certificate fingerprint.
+            return hashlib.sha1(leaf.read_bytes()).hexdigest().upper()
+    return None
+
+
 def replace_bundle(staged, destination):
     backup = staged.parent / "previous.app"
     if destination.is_symlink():
         raise SystemExit(f"拒绝替换符号链接 {destination}")
     if destination.exists():
-        info = destination / "Contents" / "Info.plist"
-        if not info.is_file() or plistlib.loads(info.read_bytes()).get("CFBundleIdentifier") != IDENTIFIER:
+        if not is_project_bundle(destination):
             raise SystemExit(f"目标路径已有另一个应用 {destination}")
         destination.rename(backup)
     try:
@@ -47,7 +68,7 @@ def replace_bundle(staged, destination):
         raise
 
 
-def package(executable, output_directory):
+def package(executable, output_directory, signing_identity):
     output_directory.mkdir(parents=True, exist_ok=True)
     destination = output_directory / APP_NAME
     with tempfile.TemporaryDirectory(prefix=".menu-rebind-", dir=output_directory) as temporary:
@@ -69,12 +90,12 @@ def package(executable, output_directory):
             "CFBundleName": "Menu Rebind",
             "CFBundlePackageType": "APPL",
             "CFBundleShortVersionString": VERSION,
-            "CFBundleVersion": "4",
+            "CFBundleVersion": "5",
             "LSMinimumSystemVersion": "14.0",
             "NSHighResolutionCapable": True,
         }
         (contents / "Info.plist").write_bytes(plistlib.dumps(info))
-        subprocess.run(["codesign", "--force", "--sign", "-", str(staged)], check=True)
+        subprocess.run(["codesign", "--force", "--sign", signing_identity, str(staged)], check=True)
         subprocess.run(["codesign", "--verify", "--strict", str(staged)], check=True)
         replace_bundle(staged, destination)
     return destination
@@ -97,19 +118,29 @@ def main():
         "--install", nargs="?", const="", metavar="DIRECTORY",
         help="安装到指定目录。省略目录时优先使用 /Applications",
     )
+    parser.add_argument(
+        "--signing-identity", metavar="IDENTITY",
+        help="使用钥匙串中的代码签名身份。默认复用目标 App 的签名证书，首次构建使用临时签名",
+    )
     options = parser.parse_args()
 
-    build = ["xcrun", "swift", "build", "--package-path", str(PROJECT), "-c", "release"]
-    subprocess.run(build, check=True)
-    binary_dir = Path(subprocess.check_output([*build, "--show-bin-path"], text=True).strip())
-    bundle = package(binary_dir / "MenuRebind", PROJECT / "dist")
-    print(f"已打包 {bundle}")
+    applications = None
     if options.install is not None:
         applications = Path("/Applications")
         if options.install:
             applications = Path(options.install).expanduser().resolve()
         elif not os.access(applications, os.W_OK):
             applications = Path.home() / "Applications"
+
+    output_directory = PROJECT / "dist"
+    target = (applications or output_directory) / APP_NAME
+    identity = options.signing_identity or previous_signing_identity(target) or "-"
+    build = ["xcrun", "swift", "build", "--package-path", str(PROJECT), "-c", "release"]
+    subprocess.run(build, check=True)
+    binary_dir = Path(subprocess.check_output([*build, "--show-bin-path"], text=True).strip())
+    bundle = package(binary_dir / "MenuRebind", output_directory, identity)
+    print(f"已打包 {bundle}")
+    if applications is not None:
         print(f"已安装 {install(bundle, applications)}")
 
 

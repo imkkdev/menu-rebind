@@ -5,11 +5,6 @@ import MenuRebindCore
 enum RunningAppMenus {
     static var isTrusted: Bool { AXIsProcessTrusted() }
 
-    static func requestAccess() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
-    }
-
     static func processID(for application: TargetApplication) -> pid_t? {
         let selectedPath = URL(fileURLWithPath: application.path).resolvingSymlinksInPath().path
         return NSRunningApplication.runningApplications(withBundleIdentifier: application.bundleIdentifier)
